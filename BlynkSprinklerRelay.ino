@@ -25,6 +25,11 @@
 #define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
 #define BLYNK_EXPERIMENTAL
 
+#define TIME_SECONDS 1000
+#define TIME_MINUTES 60000
+
+#define TIME_UNIT TIME_MINUTES
+
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 
@@ -120,14 +125,15 @@ BLYNK_WRITE(0) {
 }
 
 //// This publishes the int power back to the blynk program...
-
+//UPTIME V2
 BLYNK_READ(2) {
   //Serial.println("read");
 
-  long uptime = millis() / 1000 / 60;
+  long uptime = millis() / TIME_UNIT;
   Blynk.virtualWrite(2, uptime);
 }
 
+//REFRESH BUTTON v3
 BLYNK_WRITE(3) {
   int a = param.asInt();
   if (a != 0) {
@@ -137,40 +143,41 @@ BLYNK_WRITE(3) {
   }
 }
 
+//WATERING RUN TIME GAUGE V4
 BLYNK_READ(4) {
   //Serial.println("read watering interval");
 
   long watering = 0;
   if ( wateringStart != 0 ) {
-    watering = (millis() - wateringStart) / 1000 ;
+    watering = (millis() - wateringStart) / TIME_UNIT ;
   }
 
   Blynk.virtualWrite(4, watering);
 }
 
-//read timer left
+//WATERING TIME LEFT V5
 BLYNK_READ(5) {
   //Serial.println("read");
 
   long remaining = 0;
   if ( wateringLength != 0 && wateringStart != 0) {
-    remaining = (wateringStart + wateringLength - millis()) / 1000 ;
+    remaining = (wateringStart + wateringLength - millis()) / TIME_UNIT ;
   } else {
-    remaining = wateringLength / 1000;
+    remaining = wateringLength / TIME_UNIT;
   }
 
   Blynk.virtualWrite(5, remaining);
 }
 
-
+//WATERING TIME INTERVAL SLIDER V6
 BLYNK_WRITE(6) {
   //Serial.println("write watering length");
   long a = param.asLong();
   //Serial.print("write legth");
-  wateringLength = a * 1000;
+  wateringLength = a * TIME_UNIT;
 }
 
-//timer virtual pin
+//SCHEDULED TIMER ON/OFF V10
 BLYNK_WRITE(10) {
   int a = param.asInt();
   if (a == 0) {
