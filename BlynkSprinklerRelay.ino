@@ -38,6 +38,7 @@
 #include <WifiManager.h>
 
 #include <SimpleTimer.h>
+#include <DHT.h>
 
 //either create a config.h and define auth token there
 //or comment and include here like: 
@@ -48,6 +49,11 @@ WiFiManager wifi(0);
 
 SimpleTimer timer;
 int timerId;
+
+#define DHTPIN 4 // what pin we're connected to
+#define DHTTYPE DHT22 // DHT 11
+DHT dht(DHTPIN, DHTTYPE, 20);
+
 
 //WidgetLED led1(1);
 
@@ -74,6 +80,8 @@ void setup()
 
   timer.setInterval(1000, heartBeat);
 
+  dht.begin();
+  
   Serial.println("done setup");
 }
 
@@ -194,6 +202,7 @@ BLYNK_WRITE(10) {
   Serial.println("write");
 }
 
+//RESET ESP V20
 BLYNK_WRITE(20) {
   int a = param.asInt();
   if (a == 0) {
@@ -201,4 +210,18 @@ BLYNK_WRITE(20) {
     ESP.reset();
   }
 }
+
+BLYNK_READ(30) {
+  //Serial.println("read");
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  char charVal[4];
+  dtostrf(t, 5, 1, charVal);
+  Blynk.virtualWrite(30, charVal);
+  Blynk.virtualWrite(29, charVal);
+  dtostrf(h, 5, 2, charVal);
+  Blynk.virtualWrite(31, charVal);
+}
+
 
