@@ -21,27 +21,28 @@
  * Change WiFi ssid, pass, and Blynk auth token to run :)
  *
  **************************************************************/
-
-#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
+//#define BLYNK_DEBUG
+#define BLYNK_PRINT Serial        // Comment this out to disable prints and save space
 #define BLYNK_EXPERIMENTAL
 
 #define TIME_SECONDS 1000
 #define TIME_MINUTES 60000
 
-#define TIME_UNIT TIME_MINUTES
+//#define TIME_UNIT TIME_MINUTES
+#define TIME_UNIT TIME_SECONDS
 
-#include <ESP8266WiFi.h>
-#include <BlynkSimpleEsp8266.h>
+#include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
+#include <BlynkSimpleEsp8266.h>   //https://github.com/blynkkk/blynk-library
 
 #include <EEPROM.h>
 #include <ESP8266mDNS.h>
-#include <WifiManager.h>
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 
-#include <SimpleTimer.h>
+#include <SimpleTimer.h>          //http://playground.arduino.cc/Code/SimpleTimer
 #include <DHT.h>
 
 //either create a config.h and define auth token there
-//or comment and include here like: 
+//or comment and include here like:
 //char auth[] = "BLYNK_AUTH_TOKEN";
 #include "Config.h"
 
@@ -49,17 +50,32 @@ WiFiManager wifi(0);
 
 SimpleTimer timer;
 int timerId;
+unsigned long counter = 0;
 
-#define DHTPIN 4 // what pin we're connected to
+float h = 0;
+float t = 0;
+
+//DHT22 config
+#define DHTPIN 4 // what pin DHT is connected to
 #define DHTTYPE DHT22 // DHT 11
 DHT dht(DHTPIN, DHTTYPE, 20);
 
-
-//WidgetLED led1(1);
-
 boolean started = false;
-long wateringStart = 0;
-long wateringLength = 0;
+
+int selected = 1;
+
+unsigned long channelRemainingPins[4] = {1, 2, 3, 4};
+unsigned long channelStatusPins[4] = {5, 6, 7, 8};
+unsigned long wateringStart[4] = {0, 0, 0, 0};
+unsigned long wateringLength[4] = {0, 0, 0, 0};
+
+const int CMD_WAIT = 0;
+const int CMD_START = 1;
+const int CMD_STOP = 2;
+const int CMD_STOP_SELECTED = 3;
+
+int state = CMD_WAIT;
+String status = "boot";
 
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
@@ -68,67 +84,263 @@ void setup()
 {
 
   Serial.begin(115200);
+
+  //taking care of wifi connection
   wifi.autoConnect("Blynk");
   String ssid = wifi.getSSID();
   String pass = wifi.getPassword();
 
-  Blynk.begin(auth, ssid.c_str(), pass.c_str());
-  //Blynk.begin(auth, ssid.c_str(), "");
+  //config blynk
+  Blynk.config(auth);
 
+  //setup pins
   pinMode(5, OUTPUT);
   digitalWrite(5, LOW);
 
+  //setup timers
   timer.setInterval(1000, heartBeat);
 
+  //setup hardware
   dht.begin();
-  
+
   Serial.println("done setup");
 }
 
 
 void loop()
 {
+  //blynk connect and run loop
   Blynk.run();
+  //timer run loop
   timer.run();
+
+  //run once after blynk is connected
   if (!started && Blynk.connected()) {
-    //intial setup after connected
     started = true;
-    for (int i = 0; i < 7; i++) {
-      Blynk.virtualWrite(1, i % 2);
-      delay(200);
-    }
+    setStatus(0, status);
+    Blynk.virtualRead(0);
   }
+
+  //  if (Blynk.connected()) {
+
+  if (state != CMD_WAIT) {
+    Serial.println("new command");
+    switch (state) {
+      case CMD_START:
+        Serial.println("start water");
+        digitalWrite(5, HIGH);
+        if (wateringStart[selected - 1] == 0) {
+          wateringStart[selected - 1] = millis();
+          setStatus(selected -1, "   ON");
+        }
+        break;
+      case CMD_STOP:
+        Serial.println("stop water");
+        for (int i = 0; i < 4; i++) {
+          if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
+            //done watering
+            digitalWrite(5, LOW);
+            wateringStart[i] = 0;
+            wateringLength[i] = 0;
+            setStatus(i, "  off");
+            Blynk.virtualWrite(channelRemainingPins[i], 0);
+          }
+        }
+        break;
+    }
+    //reset state
+    state = CMD_WAIT;
+  }
+  //  }
+  //TODO:
+  //timer with auto timeout
+  //check to see when we lost connectivity and reboot after a set time
+
+
 }
+
+
+
+
+
 
 void heartBeat() {
-  if ( wateringLength != 0 ) {
-    if ((wateringStart + wateringLength - millis()) < 1000) {
-      //wateringLength = 0;
-      Serial.println("done watering");
-      digitalWrite(5, LOW);
-      wateringStart = 0;
-      int i = digitalRead(5);
-      Blynk.virtualWrite(1, i);
-      Blynk.push_notification("watering done");
+  counter++;
+
+  int i = counter % 4;
+  unsigned long remaining = 0;
+  if (wateringStart[i] > 0) {
+    remaining = (wateringStart[i] + wateringLength[i] - millis()) / TIME_UNIT ;
+  }
+  //Blynk.virtualWrite(19, remaining);
+  Blynk.virtualWrite(channelRemainingPins[i], remaining);
+
+
+  if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
+    //done watering
+    state = CMD_STOP;
+  }
+
+
+  if (counter % 60 == 0) {
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+
+    if (!isnan(h) && !isnan(t)) {
+      sendData();
     }
   }
 }
 
-// This takes the value of virtual pin 0 in blynk program...  if it is 1 turns on, else off...
-BLYNK_WRITE(0) {
-  int a = param.asInt();
-  if (a == 0) {
-    digitalWrite(5, LOW);
+void startWatering(int wl) {
+  wateringLength[selected - 1] = wl * TIME_UNIT;
+  state = CMD_START;
+}
 
+void setStatus(int channel, String s) {
+  status = s;
+  Blynk.virtualWrite(channelStatusPins[channel], status);
+}
+
+BLYNK_WRITE(0) {
+  Serial.println("selected");
+  int a = param.asInt();
+  selected = a;
+}
+
+BLYNK_WRITE(11) {
+  int a = param.asInt();
+  if (a != 0) {
+    startWatering(30);
+  }
+}
+
+BLYNK_WRITE(12) {
+  int a = param.asInt();
+  if (a != 0) {
+    startWatering(60);
+  }
+}
+
+BLYNK_WRITE(13) {
+  int a = param.asInt();
+  if (a != 0) {
+    startWatering(90);
+  }
+}
+
+BLYNK_WRITE(14) {
+  int a = param.asInt();
+  if (a != 0) {
+    startWatering(120);
+  }
+}
+
+//status indicator - value display widget
+BLYNK_READ(10) {
+  Blynk.virtualWrite(10, status);
+}
+
+//stop - button
+BLYNK_WRITE(18) {
+  int a = param.asInt();
+  if (a != 0) {
+    state = CMD_STOP_SELECTED;
+  }
+}
+
+//time left indicator - value display widget
+/*BLYNK_READ(19) {
+  unsigned long remaining = 0;
+  if (wateringStart[0] > 0) {
+    remaining = (wateringStart[0] + wateringLength[0] - millis()) / TIME_UNIT ;
+  }
+  Blynk.virtualWrite(19, remaining);
+}*/
+
+BLYNK_READ(30) {
+  long uptime = millis() / TIME_UNIT;
+  Blynk.virtualWrite(30, uptime);
+}
+
+
+//RESET ESP V31 - Button
+BLYNK_WRITE(31) {
+  int a = param.asInt();
+  if (a != 0) {
+    Serial.println("reset");
+    ESP.reset();
+    delay(1000);
+  }
+}
+
+
+void sendData() {
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  WiFiClient emoClient;
+
+  const int httpPort = 80;
+  if (!emoClient.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  String url = "/input/post.json?node=";
+  url += nodeId;
+  url += "&apikey=";
+  url += privateKey;
+  url += "&json={temperature:";
+  url += t;
+  url += ",humidity:";
+  url += h;
+  url += "}";
+
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+
+  // This will send the request to the server
+  emoClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                  "Host: " + host + "\r\n" +
+                  "Connection: close\r\n\r\n");
+  delay(10);
+
+  // Read all the lines of the reply from server and print them to Serial
+  while (emoClient.available()) {
+    String line = emoClient.readStringUntil('\r');
+    Serial.print(line);
+  }
+
+  Serial.println();
+  Serial.println("closing connection");
+}
+
+/*
+
+
+void switchWater(int status) {
+  int i = digitalRead(5);
+  if (status == 0) {
+    digitalWrite(5, LOW);
+    if (i == 0) {
+      wateringSince = millis();
+    }
     wateringStart = 0;
   } else {
     digitalWrite(5, HIGH);
     if (wateringStart == 0) {
       wateringStart = millis();
-      //Blynk.virtualRead(6);
+      wateringSince = 0;
     }
   }
-  Blynk.virtualWrite(1, a);
+  Blynk.virtualWrite(1, status);
+}
+
+// This takes the value of virtual pin 0 in blynk program...  if it is 1 turns on, else off...
+BLYNK_WRITE(0) {
+  int a = param.asInt();
+  switchWater(a);
   Serial.println("write");
 }
 
@@ -185,21 +397,18 @@ BLYNK_WRITE(6) {
   wateringLength = a * TIME_UNIT;
 }
 
+//HAVEN t watered since
+BLYNK_READ(7) {
+  //Serial.println("read");
+
+  long since = (millis() - wateringSince) / TIME_UNIT;
+  Blynk.virtualWrite(7, wateringSince == 0 ? 0 : since);
+}
+
 //SCHEDULED TIMER ON/OFF V10
 BLYNK_WRITE(10) {
   int a = param.asInt();
-  if (a == 0) {
-    digitalWrite(5, LOW);
-
-    wateringStart = 0;
-  } else {
-    digitalWrite(5, HIGH);
-    if (wateringStart == 0) {
-      wateringStart = millis();
-    }
-  }
-  Blynk.virtualWrite(1, a);
-  Serial.println("write");
+  switchWater(a);
 }
 
 //RESET ESP V20
@@ -213,15 +422,57 @@ BLYNK_WRITE(20) {
 
 BLYNK_READ(30) {
   //Serial.println("read");
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
+  h = dht.readHumidity();
+  t = dht.readTemperature();
 
   char charVal[4];
-  dtostrf(t, 5, 1, charVal);
+  dtostrf(t, 5, 2, charVal);
   Blynk.virtualWrite(30, charVal);
   Blynk.virtualWrite(29, charVal);
   dtostrf(h, 5, 2, charVal);
   Blynk.virtualWrite(31, charVal);
 }
 
+void sendData() {
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  WiFiClient emoClient;
+
+  const int httpPort = 80;
+  if (!emoClient.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  String url = "/input/post.json?node=";
+  url += nodeId;
+  url += "&apikey=";
+  url += privateKey;
+  url += "&json={temperature:";
+  url += t;
+  url += ",humidity:";
+  url += h;
+  url += "}";
+
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+
+  // This will send the request to the server
+  emoClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                  "Host: " + host + "\r\n" +
+                  "Connection: close\r\n\r\n");
+  delay(10);
+
+  // Read all the lines of the reply from server and print them to Serial
+  while (emoClient.available()) {
+    String line = emoClient.readStringUntil('\r');
+    Serial.print(line);
+  }
+
+  Serial.println();
+  Serial.println("closing connection");
+}
+
+*/
 
