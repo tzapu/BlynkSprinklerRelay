@@ -62,20 +62,24 @@ DHT dht(DHTPIN, DHTTYPE, 20);
 
 boolean started = false;
 
-int selected = 1;
+int selected = 0;
 
-unsigned long channelRemainingPins[4] = {1, 2, 3, 4};
-unsigned long channelStatusPins[4] = {5, 6, 7, 8};
-unsigned long wateringStart[4] = {0, 0, 0, 0};
-unsigned long wateringLength[4] = {0, 0, 0, 0};
+const int channelPins[4]          = {5, 4, 2, 0};
+const int channelRemainingPins[4] = {1, 2, 3, 4};
+const int channelStatusPins[4]    = {5, 6, 7, 8};
+unsigned long wateringStart[4]    = {0, 0, 0, 0};
+unsigned long wateringLength[4]   = {0, 0, 0, 0};
+String statuses[4]                = {"", "", "", ""};
+//String status = "boot";
+
 
 const int CMD_WAIT = 0;
 const int CMD_START = 1;
 const int CMD_STOP = 2;
 const int CMD_STOP_SELECTED = 3;
+const int CMD_STOP_EXPIRED = 4;
 
 int state = CMD_WAIT;
-String status = "boot";
 
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
@@ -87,15 +91,18 @@ void setup()
 
   //taking care of wifi connection
   wifi.autoConnect("Blynk");
-  String ssid = wifi.getSSID();
-  String pass = wifi.getPassword();
+  //String ssid = wifi.getSSID();
+  //String pass = wifi.getPassword();
 
   //config blynk
   Blynk.config(auth);
 
   //setup pins
-  pinMode(5, OUTPUT);
-  digitalWrite(5, LOW);
+  for (int i = 0; i < 4; i++) {
+    pinMode(channelPins[i], OUTPUT);
+    digitalWrite(channelPins[i], LOW);
+    delay(10);
+  }
 
   //setup timers
   timer.setInterval(1000, heartBeat);
@@ -117,8 +124,17 @@ void loop()
   //run once after blynk is connected
   if (!started && Blynk.connected()) {
     started = true;
-    setStatus(0, status);
+    //setStatus(0, status);
+    setStatus(0, "Node");
+    yield();
+    setStatus(1, "has");
+    yield();
+    setStatus(2, "boot");
+    yield();
+    setStatus(3, "ed");
+    yield();
     Blynk.virtualRead(0);
+    yield();
   }
 
   //  if (Blynk.connected()) {
@@ -128,18 +144,39 @@ void loop()
     switch (state) {
       case CMD_START:
         Serial.println("start water");
-        digitalWrite(5, HIGH);
-        if (wateringStart[selected - 1] == 0) {
-          wateringStart[selected - 1] = millis();
-          setStatus(selected -1, "   ON");
+        digitalWrite(channelPins[selected], HIGH);
+        if (wateringStart[selected] == 0) {
+          wateringStart[selected] = millis();
+          setStatus(selected, "   ON");
         }
         break;
       case CMD_STOP:
-        Serial.println("stop water");
+        Serial.println("stop all");
+        for (int i = 0; i < 4; i++) {
+          //done watering
+          digitalWrite(channelPins[i], LOW);
+          wateringStart[i] = 0;
+          wateringLength[i] = 0;
+          setStatus(i, "  off");
+          Blynk.virtualWrite(channelRemainingPins[i], 0);
+        }
+        break;
+      case CMD_STOP_SELECTED:
+        Serial.println("stop selected");
+        //done watering
+        digitalWrite(channelPins[selected], LOW);
+        wateringStart[selected] = 0;
+        wateringLength[selected] = 0;
+        setStatus(selected, "  off");
+        Blynk.virtualWrite(channelRemainingPins[selected], 0);
+
+        break;
+      case CMD_STOP_EXPIRED:
+        Serial.println("stop expired");
         for (int i = 0; i < 4; i++) {
           if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
             //done watering
-            digitalWrite(5, LOW);
+            digitalWrite(channelPins[i], LOW);
             wateringStart[i] = 0;
             wateringLength[i] = 0;
             setStatus(i, "  off");
@@ -178,7 +215,7 @@ void heartBeat() {
 
   if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
     //done watering
-    state = CMD_STOP;
+    state = CMD_STOP_EXPIRED;
   }
 
 
@@ -193,19 +230,19 @@ void heartBeat() {
 }
 
 void startWatering(int wl) {
-  wateringLength[selected - 1] = wl * TIME_UNIT;
+  wateringLength[selected] = wl * TIME_UNIT;
   state = CMD_START;
 }
 
 void setStatus(int channel, String s) {
-  status = s;
-  Blynk.virtualWrite(channelStatusPins[channel], status);
+  statuses[channel] = s;
+  Blynk.virtualWrite(channelStatusPins[channel], s);
 }
 
 BLYNK_WRITE(0) {
   Serial.println("selected");
   int a = param.asInt();
-  selected = a;
+  selected = a - 1;
 }
 
 BLYNK_WRITE(11) {
@@ -237,8 +274,25 @@ BLYNK_WRITE(14) {
 }
 
 //status indicator - value display widget
-BLYNK_READ(10) {
-  Blynk.virtualWrite(10, status);
+BLYNK_READ(5) {
+  Blynk.virtualWrite(5, statuses[0]);
+}
+BLYNK_READ(6) {
+  Blynk.virtualWrite(6, statuses[1]);
+}
+BLYNK_READ(7) {
+  Blynk.virtualWrite(7, statuses[2]);
+}
+BLYNK_READ(8) {
+  Blynk.virtualWrite(8, statuses[3]);
+}
+
+//stop all - button
+BLYNK_WRITE(9) {
+  int a = param.asInt();
+  if (a != 0) {
+    state = CMD_STOP;
+  }
 }
 
 //stop - button
