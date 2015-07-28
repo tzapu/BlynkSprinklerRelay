@@ -38,7 +38,7 @@
 #include <ESP8266mDNS.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 
-#include <SimpleTimer.h>          //http://playground.arduino.cc/Code/SimpleTimer
+#include <SimpleTimer.h>          //http://playground.arduino.cc/Code/SimpleTimer  || https://github.com/jfturcot/SimpleTimer
 #include <DHT.h>
 
 //either create a config.h and define auth token there
