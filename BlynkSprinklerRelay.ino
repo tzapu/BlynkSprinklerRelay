@@ -154,33 +154,20 @@ void loop()
         Serial.println("stop all");
         for (int i = 0; i < 4; i++) {
           //done watering
-          digitalWrite(channelPins[i], LOW);
-          wateringStart[i] = 0;
-          wateringLength[i] = 0;
-          setStatus(i, "  off");
-          Blynk.virtualWrite(channelRemainingPins[i], 0);
+          stopWatering(i);
         }
         break;
       case CMD_STOP_SELECTED:
         Serial.println("stop selected");
         //done watering
-        digitalWrite(channelPins[selected], LOW);
-        wateringStart[selected] = 0;
-        wateringLength[selected] = 0;
-        setStatus(selected, "  off");
-        Blynk.virtualWrite(channelRemainingPins[selected], 0);
-
+        stopWatering(selected);
         break;
       case CMD_STOP_EXPIRED:
         Serial.println("stop expired");
         for (int i = 0; i < 4; i++) {
           if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
             //done watering
-            digitalWrite(channelPins[i], LOW);
-            wateringStart[i] = 0;
-            wateringLength[i] = 0;
-            setStatus(i, "  off");
-            Blynk.virtualWrite(channelRemainingPins[i], 0);
+            stopWatering(i);
           }
         }
         break;
@@ -229,9 +216,18 @@ void heartBeat() {
   }
 }
 
-void startWatering(int wl) {
-  wateringLength[selected] = wl * TIME_UNIT;
+void startWatering(int channel, int wl) {
+  wateringLength[channel] = wl * TIME_UNIT;
   state = CMD_START;
+}
+
+void stopWatering(int channel) {
+    digitalWrite(channelPins[channel], LOW);
+    wateringStart[channel] = 0;
+    wateringLength[channel] = 0;
+    setStatus(channel, "  off");
+    Blynk.virtualWrite(channelRemainingPins[channel], 0);
+
 }
 
 void setStatus(int channel, String s) {
@@ -248,28 +244,28 @@ BLYNK_WRITE(0) {
 BLYNK_WRITE(11) {
   int a = param.asInt();
   if (a != 0) {
-    startWatering(30);
+    startWatering(selected, 30);
   }
 }
 
 BLYNK_WRITE(12) {
   int a = param.asInt();
   if (a != 0) {
-    startWatering(60);
+    startWatering(selected, 60);
   }
 }
 
 BLYNK_WRITE(13) {
   int a = param.asInt();
   if (a != 0) {
-    startWatering(90);
+    startWatering(selected, 90);
   }
 }
 
 BLYNK_WRITE(14) {
   int a = param.asInt();
   if (a != 0) {
-    startWatering(120);
+    startWatering(selected, 120);
   }
 }
 
