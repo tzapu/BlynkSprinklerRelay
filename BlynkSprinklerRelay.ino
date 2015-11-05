@@ -28,8 +28,8 @@
 #define TIME_SECONDS 1000
 #define TIME_MINUTES 60000
 
-//#define TIME_UNIT TIME_MINUTES
-#define TIME_UNIT TIME_SECONDS
+#define TIME_UNIT TIME_MINUTES
+//#define TIME_UNIT TIME_SECONDS
 
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 #include <BlynkSimpleEsp8266.h>   //https://github.com/blynkkk/blynk-library
@@ -46,7 +46,6 @@
 //char auth[] = "BLYNK_AUTH_TOKEN";
 #include "Config.h"
 
-WiFiManager wifi(0);
 
 SimpleTimer timer;
 int timerId;
@@ -84,10 +83,103 @@ int state = CMD_WAIT;
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
 
+
+void sendData() {
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  WiFiClient emoClient;
+
+  const int httpPort = 80;
+  if (!emoClient.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    return;
+  }
+
+  String url = "/input/post.json?node=";
+  url += nodeId;
+  url += "&apikey=";
+  url += privateKey;
+  url += "&json={temperature:";
+  url += t;
+  url += ",humidity:";
+  url += h;
+  url += "}";
+
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+
+  // This will send the request to the server
+  emoClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+                  "Host: " + host + "\r\n" +
+                  "Connection: close\r\n\r\n");
+  delay(10);
+
+  // Read all the lines of the reply from server and print them to Serial
+  while (emoClient.available()) {
+    String line = emoClient.readStringUntil('\r');
+    Serial.print(line);
+  }
+
+  Serial.println();
+  Serial.println("closing connection");
+}
+
+
+void heartBeat() {
+  counter++;
+
+  int i = counter % 4;
+  unsigned long remaining = 0;
+  if (wateringStart[i] > 0) {
+    remaining = (wateringStart[i] + wateringLength[i] - millis()) / TIME_UNIT ;
+  }
+  //Blynk.virtualWrite(19, remaining);
+  Blynk.virtualWrite(channelRemainingPins[i], remaining);
+
+
+  if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
+    //done watering
+    state = CMD_STOP_EXPIRED;
+  }
+
+
+  if (counter % 60 == 0) {
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+
+    if (!isnan(h) && !isnan(t)) {
+      sendData();
+    }
+  }
+}
+
+void setStatus(int channel, String s) {
+  statuses[channel] = s;
+  Blynk.virtualWrite(channelStatusPins[channel], s);
+}
+
+
+void startWatering(int channel, int wl) {
+  wateringLength[channel] = wl * TIME_UNIT;
+  state = CMD_START;
+}
+
+void stopWatering(int channel) {
+  digitalWrite(channelPins[channel], LOW);
+  wateringStart[channel] = 0;
+  wateringLength[channel] = 0;
+  setStatus(channel, "  off");
+  Blynk.virtualWrite(channelRemainingPins[channel], 0);
+
+}
+
 void setup()
 {
 
   Serial.begin(115200);
+  
+  WiFiManager wifi;
 
   //taking care of wifi connection
   wifi.autoConnect("Blynk");
@@ -186,55 +278,6 @@ void loop()
 
 
 
-
-
-void heartBeat() {
-  counter++;
-
-  int i = counter % 4;
-  unsigned long remaining = 0;
-  if (wateringStart[i] > 0) {
-    remaining = (wateringStart[i] + wateringLength[i] - millis()) / TIME_UNIT ;
-  }
-  //Blynk.virtualWrite(19, remaining);
-  Blynk.virtualWrite(channelRemainingPins[i], remaining);
-
-
-  if (wateringStart[i] > 0 && wateringStart[i] + wateringLength[i] < millis()) {
-    //done watering
-    state = CMD_STOP_EXPIRED;
-  }
-
-
-  if (counter % 60 == 0) {
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-
-    if (!isnan(h) && !isnan(t)) {
-      sendData();
-    }
-  }
-}
-
-void startWatering(int channel, int wl) {
-  wateringLength[channel] = wl * TIME_UNIT;
-  state = CMD_START;
-}
-
-void stopWatering(int channel) {
-    digitalWrite(channelPins[channel], LOW);
-    wateringStart[channel] = 0;
-    wateringLength[channel] = 0;
-    setStatus(channel, "  off");
-    Blynk.virtualWrite(channelRemainingPins[channel], 0);
-
-}
-
-void setStatus(int channel, String s) {
-  statuses[channel] = s;
-  Blynk.virtualWrite(channelStatusPins[channel], s);
-}
-
 BLYNK_WRITE(0) {
   Serial.println("selected");
   int a = param.asInt();
@@ -325,204 +368,4 @@ BLYNK_WRITE(31) {
 }
 
 
-void sendData() {
-  Serial.print("connecting to ");
-  Serial.println(host);
-
-  WiFiClient emoClient;
-
-  const int httpPort = 80;
-  if (!emoClient.connect(host, httpPort)) {
-    Serial.println("connection failed");
-    return;
-  }
-
-  String url = "/input/post.json?node=";
-  url += nodeId;
-  url += "&apikey=";
-  url += privateKey;
-  url += "&json={temperature:";
-  url += t;
-  url += ",humidity:";
-  url += h;
-  url += "}";
-
-  Serial.print("Requesting URL: ");
-  Serial.println(url);
-
-  // This will send the request to the server
-  emoClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
-                  "Host: " + host + "\r\n" +
-                  "Connection: close\r\n\r\n");
-  delay(10);
-
-  // Read all the lines of the reply from server and print them to Serial
-  while (emoClient.available()) {
-    String line = emoClient.readStringUntil('\r');
-    Serial.print(line);
-  }
-
-  Serial.println();
-  Serial.println("closing connection");
-}
-
-/*
-
-
-void switchWater(int status) {
-  int i = digitalRead(5);
-  if (status == 0) {
-    digitalWrite(5, LOW);
-    if (i == 0) {
-      wateringSince = millis();
-    }
-    wateringStart = 0;
-  } else {
-    digitalWrite(5, HIGH);
-    if (wateringStart == 0) {
-      wateringStart = millis();
-      wateringSince = 0;
-    }
-  }
-  Blynk.virtualWrite(1, status);
-}
-
-// This takes the value of virtual pin 0 in blynk program...  if it is 1 turns on, else off...
-BLYNK_WRITE(0) {
-  int a = param.asInt();
-  switchWater(a);
-  Serial.println("write");
-}
-
-//// This publishes the int power back to the blynk program...
-//UPTIME V2
-BLYNK_READ(2) {
-  //Serial.println("read");
-
-  long uptime = millis() / TIME_UNIT;
-  Blynk.virtualWrite(2, uptime);
-}
-
-//REFRESH BUTTON v3
-BLYNK_WRITE(3) {
-  int a = param.asInt();
-  if (a != 0) {
-    Serial.print("refresh");
-    int i = digitalRead(5);
-    Blynk.virtualWrite(1, i);
-  }
-}
-
-//WATERING RUN TIME GAUGE V4
-BLYNK_READ(4) {
-  //Serial.println("read watering interval");
-
-  long watering = 0;
-  if ( wateringStart != 0 ) {
-    watering = (millis() - wateringStart) / TIME_UNIT ;
-  }
-
-  Blynk.virtualWrite(4, watering);
-}
-
-//WATERING TIME LEFT V5
-BLYNK_READ(5) {
-  //Serial.println("read");
-
-  long remaining = 0;
-  if ( wateringLength != 0 && wateringStart != 0) {
-    remaining = (wateringStart + wateringLength - millis()) / TIME_UNIT ;
-  } else {
-    remaining = wateringLength / TIME_UNIT;
-  }
-
-  Blynk.virtualWrite(5, remaining);
-}
-
-//WATERING TIME INTERVAL SLIDER V6
-BLYNK_WRITE(6) {
-  //Serial.println("write watering length");
-  long a = param.asLong();
-  //Serial.print("write legth");
-  wateringLength = a * TIME_UNIT;
-}
-
-//HAVEN t watered since
-BLYNK_READ(7) {
-  //Serial.println("read");
-
-  long since = (millis() - wateringSince) / TIME_UNIT;
-  Blynk.virtualWrite(7, wateringSince == 0 ? 0 : since);
-}
-
-//SCHEDULED TIMER ON/OFF V10
-BLYNK_WRITE(10) {
-  int a = param.asInt();
-  switchWater(a);
-}
-
-//RESET ESP V20
-BLYNK_WRITE(20) {
-  int a = param.asInt();
-  if (a == 0) {
-    Serial.println("reset");
-    ESP.reset();
-  }
-}
-
-BLYNK_READ(30) {
-  //Serial.println("read");
-  h = dht.readHumidity();
-  t = dht.readTemperature();
-
-  char charVal[4];
-  dtostrf(t, 5, 2, charVal);
-  Blynk.virtualWrite(30, charVal);
-  Blynk.virtualWrite(29, charVal);
-  dtostrf(h, 5, 2, charVal);
-  Blynk.virtualWrite(31, charVal);
-}
-
-void sendData() {
-  Serial.print("connecting to ");
-  Serial.println(host);
-
-  WiFiClient emoClient;
-
-  const int httpPort = 80;
-  if (!emoClient.connect(host, httpPort)) {
-    Serial.println("connection failed");
-    return;
-  }
-
-  String url = "/input/post.json?node=";
-  url += nodeId;
-  url += "&apikey=";
-  url += privateKey;
-  url += "&json={temperature:";
-  url += t;
-  url += ",humidity:";
-  url += h;
-  url += "}";
-
-  Serial.print("Requesting URL: ");
-  Serial.println(url);
-
-  // This will send the request to the server
-  emoClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
-                  "Host: " + host + "\r\n" +
-                  "Connection: close\r\n\r\n");
-  delay(10);
-
-  // Read all the lines of the reply from server and print them to Serial
-  while (emoClient.available()) {
-    String line = emoClient.readStringUntil('\r');
-    Serial.print(line);
-  }
-
-  Serial.println();
-  Serial.println("closing connection");
-}
-
-*/
 
